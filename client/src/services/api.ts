@@ -12,7 +12,12 @@ export const authApi = {
 
 export const projectsApi = {
   list: () => api.get('/projects'),
-  create: (payload: { name: string }) => api.post('/projects', payload)
+
+  create: (payload: { name: string }) =>
+    api.post('/projects', payload),
+
+  delete: (projectId: number) =>
+    api.delete(`/projects/${projectId}`)
 };
 
 export const filesApi = {
