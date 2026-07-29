@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { projectsApi } from "../services/api";
 
 type Project = {
@@ -11,6 +12,7 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectName, setProjectName] = useState("");
 
+  const navigate = useNavigate();
   const loadProjects = async () => {
     try {
       const response = await projectsApi.list();
@@ -90,12 +92,21 @@ export default function DashboardPage() {
               Owner ID: {project.owner_id}
             </p>
 
-            <button
-              onClick={() => deleteProject(project.id)}
-              className="mt-5 rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
-            >
-              Delete
-            </button>
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => navigate(`/ide/${project.id}`)}
+                className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          >
+                Open IDE
+              </button>
+
+              <button
+                onClick={() => deleteProject(project.id)}
+                className="rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         ))}
       </section>

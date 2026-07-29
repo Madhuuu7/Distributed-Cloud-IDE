@@ -13,7 +13,7 @@ function App() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/ide" element={<IDEPage />} />
+        <Route path="/ide/:projectId" element={<IDEPage />} />
       </Route>
     </Routes>
   );
