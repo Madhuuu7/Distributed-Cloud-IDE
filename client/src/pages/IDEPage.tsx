@@ -16,6 +16,10 @@ export default function IDEPage() {
 
   const [files, setFiles] = useState<FileItem[]>([]);
 
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+
+  const editorInstance = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+
   console.log("Project ID:", projectId);
 
   const loadFiles = async () => {
@@ -48,15 +52,44 @@ export default function IDEPage() {
   }
 };
 
+  const loadFile = async (file: FileItem) => {
+  try {
+    const response = await filesApi.get(file.id);
+
+    setSelectedFile(response.data);
+
+    editorInstance.current?.setValue(response.data.content);
+  } catch (error) {
+    console.error("Failed to load file", error);
+  }
+};
+
+  const saveFile = async () => {
+  if (!selectedFile || !editorInstance.current) return;
+
+  try {
+    await filesApi.update(selectedFile.id, {
+      content: editorInstance.current.getValue(),
+    });
+
+    alert("File saved successfully!");
+  } catch (error) {
+    console.error("Failed to save file", error);
+    alert("Failed to save file.");
+  }
+};
+
   useEffect(() => {
     if (!editorRef.current) return;
 
     const editor = monaco.editor.create(editorRef.current, {
-      value: 'console.log("Hello from Distributed Cloud IDE")',
+      value: '',
       language: 'javascript',
       theme: 'vs-dark',
       automaticLayout: true
     });
+
+    editorInstance.current = editor;
 
     loadFiles();
 
@@ -85,7 +118,8 @@ export default function IDEPage() {
             files.map((file) => (
               <li
                 key={file.id}
-                className="rounded px-3 py-2 hover:bg-slate-800 cursor-pointer"
+                onClick={() => loadFile(file)}
+                className="cursor-pointer rounded px-3 py-2 hover:bg-slate-800"
               >
                 {file.name}
               </li>
@@ -98,12 +132,31 @@ export default function IDEPage() {
         <div className="border-b border-slate-800 px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-white">main.ts</p>
-              <p className="text-xs text-slate-500">JavaScript • Unsaved changes</p>
+              <p className="text-sm font-semibold text-white">
+                {selectedFile?.name ?? "No file selected"}
+              </p>
+              <p className="text-xs text-slate-500">
+                {selectedFile?.name.endsWith(".py")
+                  ? "Python"
+                  : selectedFile?.name.endsWith(".js")
+                  ? "JavaScript"
+                  : "Text"}
+              </p>
             </div>
-            <button className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white">
-              Run Code
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={saveFile}
+                className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
+              >
+                Save
+              </button>
+
+              <button
+                className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white"
+              >
+                Run Code
+              </button>
+            </div>
           </div>
         </div>
         <div ref={editorRef} className="h-[560px]" />

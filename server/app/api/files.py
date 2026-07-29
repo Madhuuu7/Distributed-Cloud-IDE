@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.file import FileNode
-from app.schemas.file import FileCreate, FileOut
+from app.schemas.file import FileCreate, FileOut, FileUpdate
 
 router = APIRouter()
 
@@ -34,3 +34,31 @@ def create_file(project_id: int, payload: FileCreate, db: Session = Depends(get_
     db.commit()
     db.refresh(file_node)
     return file_node
+
+@router.get("/file/{file_id}", response_model=FileOut)
+def get_file(file_id: int, db: Session = Depends(get_db)) -> FileOut:
+    file = db.query(FileNode).filter(FileNode.id == file_id).first()
+
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return file
+
+
+@router.put("/file/{file_id}", response_model=FileOut)
+def update_file(
+    file_id: int,
+    payload: FileUpdate,
+    db: Session = Depends(get_db),
+) -> FileOut:
+    file = db.query(FileNode).filter(FileNode.id == file_id).first()
+
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file.content = payload.content
+
+    db.commit()
+    db.refresh(file)
+
+    return file

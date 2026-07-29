@@ -21,8 +21,23 @@ export const projectsApi = {
 };
 
 export const filesApi = {
-  list: (projectId: string) => api.get(`/projects/${projectId}/files`),
-  create: (projectId: string, payload: { name: string; content?: string }) => api.post(`/projects/${projectId}/files`, payload)
+  list: (projectId: string) =>
+    api.get(`/projects/${projectId}/files`),
+
+  create: (
+    projectId: string,
+    payload: { name: string; content?: string }
+  ) =>
+    api.post(`/projects/${projectId}/files`, payload),
+
+  get: (fileId: number) =>
+    api.get(`/projects/file/${fileId}`),
+
+  update: (
+    fileId: number,
+    payload: { content: string }
+  ) =>
+    api.put(`/projects/file/${fileId}`, payload)
 };
 
 export default api;

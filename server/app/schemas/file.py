@@ -6,6 +6,10 @@ class FileCreate(BaseModel):
     content: str | None = None
 
 
+class FileUpdate(BaseModel):
+    content: str
+
+
 class FileOut(BaseModel):
     id: int
     project_id: int
