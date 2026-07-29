@@ -40,4 +40,13 @@ export const filesApi = {
     api.put(`/projects/file/${fileId}`, payload)
 };
 
+export const executeApi = {
+  run: (payload: {
+    language: string;
+    code: string;
+  }) =>
+    api.post("/execute", payload),
+};
+
 export default api;
+

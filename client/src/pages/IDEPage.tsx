@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import * as monaco from 'monaco-editor';
-import { filesApi } from '../services/api';
+import { filesApi, executeApi } from '../services/api';
 
 type FileItem = {
   id: number;
@@ -17,6 +17,10 @@ export default function IDEPage() {
   const [files, setFiles] = useState<FileItem[]>([]);
 
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+
+  const [terminalOutput, setTerminalOutput] = useState(
+    "Terminal ready.\nClick 'Run Code' to execute your program."
+  );
 
   const editorInstance = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
@@ -79,6 +83,24 @@ export default function IDEPage() {
   }
 };
 
+  const runCode = async () => {
+  if (!editorInstance.current) return;
+
+  try {
+    setTerminalOutput("Running...\n");
+
+    const response = await executeApi.run({
+      language: "python",
+      code: editorInstance.current.getValue(),
+    });
+
+    setTerminalOutput(response.data.output);
+  } catch (error) {
+    console.error("Failed to execute code", error);
+    setTerminalOutput("Execution failed.");
+  }
+};
+
   useEffect(() => {
     if (!editorRef.current) return;
 
@@ -97,7 +119,7 @@ export default function IDEPage() {
   }, [projectId]);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+    <div className="grid gap-4 lg:grid-cols-[280px_1fr] lg:grid-rows-[1fr_180px]">
       <aside className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Explorer</h2>
@@ -128,7 +150,7 @@ export default function IDEPage() {
         </ul>
       </aside>
 
-      <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80">
+      <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 lg:row-span-1">
         <div className="border-b border-slate-800 px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
@@ -152,6 +174,7 @@ export default function IDEPage() {
               </button>
 
               <button
+                onClick={runCode}
                 className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white"
               >
                 Run Code
@@ -161,6 +184,15 @@ export default function IDEPage() {
         </div>
         <div ref={editorRef} className="h-[560px]" />
       </section>
+        <section className="lg:col-span-2 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80">
+          <div className="border-b border-slate-800 px-4 py-2">
+            <h3 className="text-sm font-semibold text-white">Terminal</h3>
+          </div>
+
+          <pre className="h-40 overflow-auto bg-black p-4 font-mono text-sm text-green-400 whitespace-pre-wrap">
+            {terminalOutput}
+          </pre>
+        </section>
     </div>
   );
 }

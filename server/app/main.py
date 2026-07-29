@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import auth, projects, files
+from app.api import auth, projects, files, execute
 from app.db.session import engine, Base
 
 Base.metadata.create_all(bind=engine)
@@ -18,6 +18,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(files.router, prefix="/projects", tags=["files"])
+app.include_router(execute.router, prefix="/execute", tags=["execute"])
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
