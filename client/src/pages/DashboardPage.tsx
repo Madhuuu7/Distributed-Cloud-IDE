@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { errorMessage, projectsApi } from '../services/api';
-import type { Project } from '../types';
+import { errorMessage, projectsApi, workspacesApi } from '../services/api';
+import type { Project, Workspace } from '../types';
+import { Badge } from '../components/ui';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -12,6 +13,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  // Empty string means "keep it private to me" - the API takes null for that.
+  const [workspaceId, setWorkspaceId] = useState('');
 
   const loadProjects = async () => {
     try {
@@ -27,6 +31,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadProjects();
+
+    // A failure here is not worth an error banner: without the list the
+    // selector just offers "private", which is the default anyway.
+    workspacesApi
+      .list()
+      .then((response) => setWorkspaces(response.data))
+      .catch(() => setWorkspaces([]));
   }, []);
 
   const createProject = async (event: FormEvent) => {
@@ -39,7 +50,10 @@ export default function DashboardPage() {
     setCreating(true);
 
     try {
-      await projectsApi.create({ name });
+      await projectsApi.create({
+        name,
+        workspace_id: workspaceId ? Number(workspaceId) : null
+      });
       setProjectName('');
       await loadProjects();
     } catch (err) {
@@ -79,6 +93,22 @@ export default function DashboardPage() {
             onChange={(event) => setProjectName(event.target.value)}
           />
 
+          {workspaces.length > 0 && (
+            <select
+              value={workspaceId}
+              onChange={(event) => setWorkspaceId(event.target.value)}
+              title="Share this project with a workspace, or keep it to yourself"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 focus:border-brand-500 focus:outline-none"
+            >
+              <option value="">Private to me</option>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           <button
             type="submit"
             disabled={creating || !projectName.trim()}
@@ -111,7 +141,19 @@ export default function DashboardPage() {
               key={project.id}
               className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900 p-5"
             >
-              <h2 className="text-xl font-semibold text-white">{project.name}</h2>
+              <div className="flex items-start justify-between gap-2">
+                <h2 className="min-w-0 truncate text-xl font-semibold text-white">
+                  {project.name}
+                </h2>
+
+                {/* A project's sharing state is the thing most worth knowing at
+                    a glance - it decides who else can change it. */}
+                {project.workspace_id !== null && (
+                  <Badge tone="info" title="Shared with a workspace">
+                    shared
+                  </Badge>
+                )}
+              </div>
 
               <div className="mt-5 flex gap-2">
                 <button

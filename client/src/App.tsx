@@ -6,6 +6,9 @@ import DashboardPage from './pages/DashboardPage';
 import IDEPage from './pages/IDEPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import UsagePage from './pages/UsagePage';
+import WorkspaceDetailPage from './pages/WorkspaceDetailPage';
+import WorkspacesPage from './pages/WorkspacesPage';
 
 function App() {
   return (
@@ -18,6 +21,9 @@ function App() {
           <Route element={<MainLayout />}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/workspaces" element={<WorkspacesPage />} />
+            <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailPage />} />
+            <Route path="/usage" element={<UsagePage />} />
             <Route path="/ide/:projectId" element={<IDEPage />} />
           </Route>
         </Route>

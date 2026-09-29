@@ -13,13 +13,18 @@ export default function AuthCard({ title, subtitle, children }: AuthCardProps) {
         <div className="hidden bg-gradient-to-br from-brand-500 to-slate-700 p-10 lg:flex lg:flex-col lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-200">Portfolio Build</p>
-            <h1 className="mt-4 text-3xl font-semibold text-white">Distributed Cloud IDE</h1>
+            <h1 className="mt-4 text-3xl font-semibold text-white">
+              AI Developer Collaboration Platform
+            </h1>
             <p className="mt-4 max-w-md text-sm leading-6 text-slate-200">
-              A polished full-stack workspace for editing, running, and collaborating on code in a modern cloud-style experience.
+              A shared workspace where your team and an AI teammate work on the same codebase
+              &mdash; grounded answers, semantic search, and an agent that runs your tests
+              before it claims a fix works.
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-white/10 p-4 text-sm text-slate-100">
-            Built with React, FastAPI, SQLAlchemy, Monaco Editor, and JWT authentication.
+            React, FastAPI, Monaco, and a Docker sandbox. Retrieval-augmented, provider-agnostic,
+            and runnable with no API key.
           </div>
         </div>
 
