@@ -1,51 +1,130 @@
-# Distributed Cloud IDE
+# AI Developer Collaboration Platform
 
-A browser-based cloud IDE: create projects, edit files in Monaco, and run code
-inside a throwaway, network-isolated Docker container.
+A shared workspace where a development team and an AI teammate work on the same
+codebase. Projects live in workspaces with real roles, the assistant has read
+the code and cites it, and when it proposes a fix it runs the tests before
+claiming the fix works.
+
+Built on a browser IDE with Monaco and a hardened Docker sandbox.
+
+## What is actually interesting here
+
+Most "AI coding assistant" projects are a text box in front of a chat
+completion. These are the parts that are not:
+
+**The AI runs its own patches.** A fix run proposes a change, executes the
+project's tests inside the sandbox, reads the real failure output, and tries
+again. It never writes to your files - it ends holding a diff and a human
+approves it.
+
+**It runs with no API key.** The default provider generates correctly shaped
+responses locally and produces hashed n-gram embeddings that carry genuine
+lexical signal. Retrieval, streaming, caching, rate limiting and cost
+accounting all execute for real. Only the quality of the prose is fake, so the
+entire application - and all 87 tests - run at zero cost.
+
+**Retrieval chunks on structure, not line count.** Python and JavaScript
+sources split on function and class boundaries, so a retrieved chunk is a whole
+function that knows its own name. Ranking blends IDF-weighted keyword overlap
+with cosine similarity, and both component scores come back in the response so
+a surprising result can be explained rather than argued with.
+
+**Every model call is metered.** Provider, model, tokens, latency, cost and
+cache-hit are recorded per call, including cache hits - which is what makes the
+savings figure on `/ai/usage` mean anything.
 
 ## Stack
 
-**Frontend** React, Vite, TypeScript, Tailwind CSS, React Router, Axios, Monaco Editor
+**Frontend** React, Vite, TypeScript, Tailwind CSS, React Router, Axios,
+Monaco Editor
 
-**Backend** FastAPI, SQLAlchemy, SQLite, JWT authentication, Pydantic, Uvicorn, Docker SDK
+**Backend** FastAPI, SQLAlchemy 2.0, SQLite, JWT, Pydantic, NumPy, Docker SDK
+
+**AI** Provider abstraction over Anthropic (Claude), Google Gemini, Ollama, and
+a local mock. Hybrid retrieval over embeddings stored as packed `float32`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI[React + Monaco] -->|REST / SSE| API[FastAPI]
+
+    subgraph API
+        AUTH[Auth + roles]
+        AI[AI endpoints]
+        RAG[Hybrid retrieval]
+        FIX[Fix loop]
+    end
+
+    AI --> CACHE[Prompt cache]
+    AI --> REG[Provider registry]
+    REG --> MOCK[Mock]
+    REG --> CLAUDE[Anthropic]
+    REG --> GEM[Gemini]
+    REG --> OLL[Ollama]
+
+    RAG --> DB[(SQLite + vectors)]
+    FIX --> SANDBOX[Docker sandbox]
+    AI --> LEDGER[(Usage ledger)]
+```
+
+## Authorisation
+
+Three roles, strictly ordered. A project is reachable if you own it **or** you
+are a member of its workspace.
+
+| Role | Read | Write | Run code | Use AI | Manage members |
+|---|---|---|---|---|---|
+| `viewer` | yes | no | no | yes | no |
+| `editor` | yes | yes | yes | yes | no |
+| `owner` | yes | yes | yes | yes | yes |
+
+Two rules the code holds to everywhere:
+
+- **`404` for anything you cannot see**, whether or not it exists. Returning
+  `403` would confirm a resource's existence to someone with no access to it.
+- **`403` only once you are already a member** whose role is too low. You
+  already know the resource exists, so naming the real reason leaks nothing.
 
 ## Security model
 
 **Authentication.** Every endpoint except `/health`, `/auth/login`, and
-`/auth/signup` requires a bearer token. The token is resolved to a `User` by the
-`get_current_user` dependency, and every project and file query is scoped to
-that user's `owner_id`. Requesting another user's resource returns `404` rather
-than `403`, so the API never confirms that a resource exists.
+`/auth/signup` requires a bearer token.
 
-**Code execution.** Each submission runs in a fresh container that is destroyed
-afterwards. The container has:
+**Code execution.** Each run gets a fresh container that is destroyed
+afterwards:
 
 | Control | Setting |
 |---|---|
 | Network | disabled entirely |
-| Root filesystem | read-only, with a 32 MB `tmpfs` at `/tmp` for scratch |
+| Root filesystem | read-only, with a 32 MB `tmpfs` at `/tmp` |
 | User | `65534:65534` (unprivileged) |
 | Capabilities | all dropped, `no-new-privileges` |
-| Memory | 256 MB, swap disabled (`memswap_limit == mem_limit`) |
+| Memory | 256 MB, swap disabled |
 | CPU | 0.5 cores |
 | Processes | 64 PID ceiling |
 | Wall clock | 10 s, then killed |
 | Output | truncated at 64 KB |
 
-Every limit is configurable via environment variables — see `.env.example`.
+File names written into the sandbox are path-flattened, which matters more now
+that some of them come from model output.
 
-Setting `EXECUTION_BACKEND=local` replaces this with a bare subprocess on the
-host. That path has **no isolation** and exists only so the app runs on machines
-without a Docker daemon. The API logs a warning at startup when it is active.
+**AI spend.** A per-user rate limit, a hard iteration ceiling on fix runs, and
+a content-addressed prompt cache. An AI endpoint with no limit in front of a
+metered API is an unbounded bill waiting for a retry loop.
 
-> The API talks to the Docker socket directly to spawn sibling containers, which
-> grants it host-level Docker control. That is fine for local development; in
-> production, execution belongs in a separate worker behind a queue rather than
-> in the public-facing API.
+`EXECUTION_BACKEND=local` replaces the container with a bare subprocess. That
+path has **no isolation** and exists only so the app runs without a Docker
+daemon. The API logs a warning at startup when it is active.
+
+> The API talks to the Docker socket directly to spawn sibling containers,
+> which grants it host-level Docker control. Fine for local development; in
+> production, execution belongs in a separate worker behind a queue.
 
 ## Getting started
 
-Copy `.env.example` to `.env` and set a real `SECRET_KEY`.
+Copy `.env.example` to `.env` and set a real `SECRET_KEY`. Everything else has
+a working default - `AI_PROVIDER=mock` means you need no API key to start.
 
 ### Backend
 
@@ -60,8 +139,7 @@ uvicorn app.main:app --reload --port 8000
 
 Interactive API docs: <http://localhost:8000/docs>
 
-The Python and Node runtime images are pulled automatically on first use, so the
-first run of each language takes a few extra seconds. Pre-pull them to skip that:
+Runtime images are pulled on first use. Pre-pull them to skip the wait:
 
 ```bash
 docker pull python:3.12-slim
@@ -82,6 +160,22 @@ npm run dev
 docker compose up --build
 ```
 
+### Using a real model
+
+```bash
+AI_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-...
+# Anthropic has no embeddings endpoint, so pick one separately:
+AI_EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=...
+```
+
+Or keep everything on your own machine, which is the only configuration where
+source code never leaves it:
+
+```bash
+AI_PROVIDER=ollama AI_EMBEDDING_PROVIDER=ollama
+ollama pull llama3.1 && ollama pull nomic-embed-text
+```
+
 ## Tests
 
 ```bash
@@ -90,11 +184,13 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite covers authentication enforcement, cross-user isolation, and the
-execution engine. Execution tests default to `EXECUTION_BACKEND=local` so they
-pass without a Docker daemon; the container arguments themselves are asserted
-against a fake Docker client, so loosening a sandbox flag fails a test. To
-exercise the real sandbox end to end:
+87 tests, all runnable without a Docker daemon and without an API key. They
+cover authentication, cross-user isolation, role boundaries, the sandbox
+arguments themselves (loosening a flag fails a test), index staleness, cache
+behaviour, hallucinated-citation filtering, the rate limiter, and the fix loop
+driven by a scripted model.
+
+To exercise the real sandbox end to end:
 
 ```bash
 EXECUTION_BACKEND=docker pytest tests/test_execution.py
@@ -102,24 +198,70 @@ EXECUTION_BACKEND=docker pytest tests/test_execution.py
 
 ## API
 
+The contract is `docs/api/ai-collab-contract.md`; `docs/api/openapi.json` is
+generated from the app. A Postman collection with 60 assertions -
+including the `404`-not-`403` rule and the viewer `403` - is in
+`docs/api/postman/`.
+
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/auth/signup` | Returns a bearer token |
-| `POST` | `/auth/login` | Returns a bearer token |
+| `POST` | `/auth/signup` `/auth/login` | Returns a bearer token |
 | `GET` | `/auth/me` | Current user |
-| `GET` `POST` | `/projects` | Scoped to the caller |
-| `GET` `DELETE` | `/projects/{id}` | Deleting removes the project's files |
+| `GET` `POST` | `/workspaces` | Creator becomes owner |
+| `GET` `DELETE` | `/workspaces/{id}` | Deleting returns projects to their owners |
+| `GET` `POST` | `/workspaces/{id}/members` | Invite by email |
+| `PATCH` `DELETE` | `/workspaces/{id}/members/{user_id}` | Cannot strand a workspace without an owner |
+| `GET` `POST` | `/workspaces/{id}/messages` | Room chat, optionally anchored to a line |
+| `GET` `POST` | `/projects` | Accepts an optional `workspace_id` |
+| `GET` `DELETE` | `/projects/{id}` | |
 | `GET` `POST` | `/projects/{id}/files` | Language inferred from the extension |
-| `GET` `PUT` `DELETE` | `/projects/file/{id}` | |
+| `GET` `PUT` `DELETE` | `/projects/file/{id}` | Writing needs `editor` |
+| `POST` `GET` `DELETE` | `/projects/{id}/index` | Build, inspect, or drop the embedding index |
+| `POST` | `/search` | Hybrid search with both component scores |
+| `GET` | `/ai/providers` | What is configured and what is active |
+| `POST` | `/ai/chat` | Grounded answer with citations |
+| `POST` | `/ai/chat/stream` | Same, as Server-Sent Events |
+| `GET` `DELETE` | `/ai/conversations/{id}` | |
+| `POST` | `/ai/explain` | Explain a file or a selection |
+| `POST` | `/ai/review` | Inline findings anchored to real lines |
+| `GET` | `/ai/usage` | Tokens, cost, cache hit rate, savings |
+| `POST` `GET` | `/fix-runs` | Start or list agentic fix runs |
+| `GET` | `/fix-runs/{id}` | Every iteration, plus the proposed diff |
+| `POST` | `/fix-runs/{id}/apply` | Write the approved patch |
+| `POST` | `/fix-runs/{id}/cancel` | |
 | `GET` | `/execute/languages` | Supported runtimes |
-| `POST` | `/execute` | Returns stdout, stderr, exit code, duration |
+| `POST` | `/execute` | stdout, stderr, exit code, duration |
 | `GET` | `/health` | Public |
+
+## Known limitations
+
+Stated rather than hidden, because each one is a deliberate trade:
+
+- **The prompt cache and rate limiter are in-process.** Run two API workers and
+  each keeps its own. Both are behind narrow interfaces so Redis drops in.
+- **Vector search scores every chunk in NumPy.** Honest to a few thousand
+  chunks. `VectorStore` exists so pgvector can replace it without touching the
+  ranking code.
+- **Chunking is regex-based, not a real parser.** No build step and no native
+  dependency, and it degrades to line windows rather than failing. A malformed
+  file gets slightly worse chunks, never an exception.
+- **The mock provider's embeddings are lexical, not semantic.** `car` and
+  `automobile` stay far apart. Good enough to exercise and measure the
+  pipeline; switch providers before claiming otherwise.
+- **The sandbox has no network**, so nothing can be `pip install`ed into it and
+  `pytest` is not in the base image. Fix runs default to `unittest discover`,
+  which ships with the standard library.
 
 ## Roadmap
 
-Built: authentication, project and file management, Monaco editor, sandboxed
-Python and JavaScript execution.
+Built: authentication, workspaces and roles, project and file management,
+Monaco editor, sandboxed Python and JavaScript execution, provider abstraction
+with caching and cost accounting, structural chunking and hybrid retrieval,
+grounded chat with citations and SSE streaming, AI explain and review, the
+agentic fix loop, and the usage dashboard.
 
-Next: WebSocket streaming for live output, xterm.js interactive terminal,
-real-time collaborative editing (Yjs), PostgreSQL migration, AI assistant panel,
-Git integration, Kubernetes manifests.
+Next: real-time collaborative editing over WebSockets (Yjs CRDT with presence
+cursors), xterm.js interactive terminal, GitHub OAuth with repository import
+and PR creation, a daily standup digest, PostgreSQL with pgvector, Redis for
+the cache and cross-worker fan-out, and an eval harness scoring retrieval
+against a golden question set.

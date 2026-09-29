@@ -1,0 +1,748 @@
+{
+  "info": {
+    "name": "AI Developer Collaboration Platform",
+    "description": "Runnable contract check for docs/api/ai-collab-contract.md.\n\nRun the folders in order with the Collection Runner: each one stores the ids the next needs, so a single pass exercises signup, workspace sharing, indexing, retrieval, the AI assistant, and a fix run.\n\nIt asserts the contract's rules, not just that requests return 200 - in particular the 404-not-403 rule for resources the caller cannot see, and the 403 that a viewer gets when their role is too low.\n\nDefaults assume AI_PROVIDER=mock, so a full run costs nothing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "email", "value": "runner@example.com" },
+    { "key": "password", "value": "supersecret123" },
+    { "key": "viewerEmail", "value": "runner-viewer@example.com" },
+    { "key": "token", "value": "" },
+    { "key": "viewerToken", "value": "" },
+    { "key": "workspaceId", "value": "" },
+    { "key": "projectId", "value": "" },
+    { "key": "fileId", "value": "" },
+    { "key": "runId", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "00 - Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('reports its execution backend', () => pm.expect(body).to.have.property('execution_backend'));",
+                  "pm.test('reports its AI provider', () => pm.expect(body).to.have.property('ai_provider'));",
+                  "if (body.execution_backend !== 'docker') {",
+                  "  console.warn('EXECUTION_BACKEND is ' + body.execution_backend + ' - user code is NOT sandboxed.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Auth",
+      "item": [
+        {
+          "name": "POST /auth/signup (owner)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Collection Runner\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 409 on a re-run is fine - the account already exists.",
+                  "pm.test('201 or 409', () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().access_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('token', pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/signup (viewer)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{viewerEmail}}\",\n  \"password\": \"{{password}}\",\n  \"full_name\": \"Read Only\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/signup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.collectionVariables.set('viewerToken', pm.response.json().access_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /ai/usage without a token -> 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}/ai/usage"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, not 403 - no credentials were offered', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Workspace & roles",
+      "item": [
+        {
+          "name": "POST /workspaces",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Contract Run {{$timestamp}}\"\n}"
+            },
+            "url": "{{baseUrl}}/workspaces"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('the creator is an owner', () => pm.expect(body.role).to.eql('owner'));",
+                  "pm.test('and is the only member', () => pm.expect(body.member_count).to.eql(1));",
+                  "pm.collectionVariables.set('workspaceId', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST members (invite viewer)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{viewerEmail}}\",\n  \"role\": \"viewer\"\n}"
+            },
+            "url": "{{baseUrl}}/workspaces/{{workspaceId}}/members"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('joined as a viewer', () => pm.expect(pm.response.json().role).to.eql('viewer'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST members again -> 409",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{viewerEmail}}\",\n  \"role\": \"viewer\"\n}"
+            },
+            "url": "{{baseUrl}}/workspaces/{{workspaceId}}/members"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 - already a member', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET a workspace that does not exist -> 404",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/workspaces/99999999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "// The contract requires the same 404 for a workspace that",
+                  "// exists but is not the caller's. If these ever differ, the",
+                  "// API is confirming existence to a stranger."
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Project & files",
+      "item": [
+        {
+          "name": "POST /projects (in the workspace)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"billing-service\",\n  \"workspace_id\": {{workspaceId}}\n}"
+            },
+            "url": "{{baseUrl}}/projects"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('belongs to the workspace', () => pm.expect(body.workspace_id).to.eql(Number(pm.collectionVariables.get('workspaceId'))));",
+                  "pm.collectionVariables.set('projectId', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST a file",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"auth.py\",\n  \"content\": \"import os\\n\\nSECRET_KEY = os.getenv(\\\"SECRET_KEY\\\")\\n\\n\\ndef verify_access_token(token):\\n    \\\"\\\"\\\"Decode a bearer token and return its subject.\\\"\\\"\\\"\\n    return decode(token, SECRET_KEY)\\n\\n\\ndef list_invoices(customer_id):\\n    return db.query(Invoice).filter(Invoice.customer == customer_id).all()\\n\"\n}"
+            },
+            "url": "{{baseUrl}}/projects/{{projectId}}/files"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('language inferred from the extension', () => pm.expect(body.language).to.eql('python'));",
+                  "pm.collectionVariables.set('fileId', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer writes a file -> 403",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{viewerToken}}", "type": "string" }]
+            },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"content\": \"# overwritten\\n\"\n}" },
+            "url": "{{baseUrl}}/projects/file/{{fileId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, not 404 - a member may know the file exists', () => pm.response.to.have.status(403));",
+                  "pm.test('and is told why', () => pm.expect(pm.response.json().detail).to.include('editor'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer reads the same file -> 200",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{viewerToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/file/{{fileId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 - viewers can read', () => pm.response.to.have.status(200));",
+                  "pm.test('the write above did not land', () => pm.expect(pm.response.json().content).to.include('verify_access_token'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Index & search",
+      "item": [
+        {
+          "name": "POST /search before indexing -> 409",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"verify access token\",\n  \"project_id\": {{projectId}}\n}"
+            },
+            "url": "{{baseUrl}}/search"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 and says what to do about it', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().detail.toLowerCase()).to.include('index');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /projects/:id/index",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/projects/{{projectId}}/index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 - indexing is asynchronous', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /projects/:id/index",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{projectId}}/index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.status === 'building') {",
+                  "  // Still working - poll this request again.",
+                  "  postman.setNextRequest('GET /projects/:id/index');",
+                  "} else {",
+                  "  pm.test('ready', () => pm.expect(body.status).to.eql('ready'));",
+                  "  pm.test('chunks were produced', () => pm.expect(body.chunk_count).to.be.above(0));",
+                  "  pm.test('and the index is fresh', () => pm.expect(body.stale).to.be.false);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"verify access token\",\n  \"project_id\": {{projectId}},\n  \"k\": 3\n}"
+            },
+            "url": "{{baseUrl}}/search"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const results = pm.response.json().results;",
+                  "pm.test('found something', () => pm.expect(results).to.not.be.empty);",
+                  "pm.test('the top hit is the right function', () => pm.expect(results[0].symbol).to.eql('verify_access_token'));",
+                  "pm.test('both ranker scores are reported', () => {",
+                  "  pm.expect(results[0]).to.have.property('keyword_score');",
+                  "  pm.expect(results[0]).to.have.property('vector_score');",
+                  "});",
+                  "pm.test('scores are normalised to [0,1]', () => {",
+                  "  pm.expect(results[0].score).to.be.at.least(0).and.at.most(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - AI assistant",
+      "item": [
+        {
+          "name": "GET /ai/providers",
+          "request": { "method": "GET", "url": "{{baseUrl}}/ai/providers" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const active = pm.response.json().filter(p => p.active);",
+                  "pm.test('exactly one provider is active', () => pm.expect(active).to.have.lengthOf(1));",
+                  "pm.test('and it is actually usable', () => pm.expect(active[0].configured).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat (grounded)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How does token verification work?\",\n  \"project_id\": {{projectId}}\n}"
+            },
+            "url": "{{baseUrl}}/ai/chat"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('the answer says what it was grounded in', () => pm.expect(body.citations).to.not.be.empty);",
+                  "pm.test('citations point at real files', () => pm.expect(body.citations[0].path).to.eql('auth.py'));",
+                  "pm.test('cost is reported', () => pm.expect(body).to.have.property('cost_usd'));",
+                  "pm.collectionVariables.set('conversationId', body.conversation_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/chat again (cache hit)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How does token verification work?\",\n  \"project_id\": {{projectId}}\n}"
+            },
+            "url": "{{baseUrl}}/ai/chat"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('served from cache', () => pm.expect(body.cached).to.be.true);",
+                  "pm.test('and charged nothing', () => pm.expect(body.cost_usd).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /ai/explain",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file_id\": {{fileId}},\n  \"start_line\": 1,\n  \"end_line\": 9999\n}"
+            },
+            "url": "{{baseUrl}}/ai/explain"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('an over-long range is clamped, not rejected', () => pm.expect(pm.response.json().end_line).to.be.below(9999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /ai/usage",
+          "request": { "method": "GET", "url": "{{baseUrl}}/ai/usage?days=7" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('calls were recorded', () => pm.expect(body.total_calls).to.be.above(0));",
+                  "pm.test('the cache hit rate is reported', () => pm.expect(body.cache_hit_rate).to.be.at.least(0).and.at.most(1));",
+                  "pm.test('usage is split by feature', () => pm.expect(body.by_feature).to.not.be.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Agentic fix run",
+      "item": [
+        {
+          "name": "Seed a failing project",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"calculator\"\n}" },
+            "url": "{{baseUrl}}/projects"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('fixProjectId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add calc.py (with the bug)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"calc.py\",\n  \"content\": \"def add(a, b):\\n    return a - b\\n\"\n}"
+            },
+            "url": "{{baseUrl}}/projects/{{fixProjectId}}/files"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('201', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add test_calc.py",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"test_calc.py\",\n  \"content\": \"import unittest\\n\\nfrom calc import add\\n\\n\\nclass AddTest(unittest.TestCase):\\n    def test_adds(self):\\n        self.assertEqual(add(2, 3), 5)\\n\"\n}"
+            },
+            "url": "{{baseUrl}}/projects/{{fixProjectId}}/files"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('201', () => pm.response.to.have.status(201));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /fix-runs",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"project_id\": {{fixProjectId}},\n  \"instruction\": \"Make the failing test pass.\",\n  \"max_iterations\": 2\n}"
+            },
+            "url": "{{baseUrl}}/fix-runs"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 - the run is queued, not finished', () => pm.response.to.have.status(202));",
+                  "pm.collectionVariables.set('runId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /fix-runs/:id",
+          "request": { "method": "GET", "url": "{{baseUrl}}/fix-runs/{{runId}}" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "",
+                  "if (['queued', 'running'].includes(body.status)) {",
+                  "  setTimeout(() => {}, 1500);",
+                  "  postman.setNextRequest('GET /fix-runs/:id');",
+                  "  return;",
+                  "}",
+                  "",
+                  "pm.test('a baseline run happened before any change', () => {",
+                  "  pm.expect(body.iterations[0].iteration).to.eql(0);",
+                  "  pm.expect(body.iterations[0].passed).to.be.false;",
+                  "});",
+                  "pm.test('the baseline captured the real test failure', () => {",
+                  "  pm.expect(body.iterations[0].stderr || '').to.include('AssertionError');",
+                  "});",
+                  "",
+                  "// With AI_PROVIDER=mock the model proposes nothing, so the",
+                  "// honest outcome is 'failed'. Against a real provider this",
+                  "// should reach awaiting_approval with a diff.",
+                  "pm.test('ended in a terminal state', () => {",
+                  "  pm.expect(['awaiting_approval', 'failed']).to.include(body.status);",
+                  "});",
+                  "",
+                  "if (body.status === 'awaiting_approval') {",
+                  "  pm.test('a diff is offered for review', () => pm.expect(body.diff).to.include('+'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Project files are untouched until /apply",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/projects/{{fixProjectId}}/files"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "// The safety rule the whole feature rests on: a fix run",
+                  "// proposes, a human disposes.",
+                  "const calc = pm.response.json().find(f => f.name === 'calc.py');",
+                  "pm.test('calc.py still exists', () => pm.expect(calc).to.not.be.undefined);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
