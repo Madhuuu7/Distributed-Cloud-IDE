@@ -1,17 +1,41 @@
+import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
+
 from app.core.config import ALGORITHM, SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _prepare(password: str) -> bytes:
+    """Reduce a password to a fixed 44 bytes before bcrypt sees it.
+
+    bcrypt hashes at most 72 bytes and ignores everything after. passlib used
+    to truncate silently, which turns a long passphrase into only its first 72
+    bytes of entropy; modern bcrypt raises instead, which is safer but means a
+    long password is a 500 rather than a login.
+
+    Hashing to SHA-256 first and base64-encoding the digest keeps the entropy
+    of the whole password inside bcrypt's limit. The base64 step matters: the
+    raw digest can contain a NUL byte, and bcrypt stops reading there.
+    """
+    digest = hashlib.sha256(password.encode("utf-8")).digest()
+
+    return base64.b64encode(digest)
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_prepare(password), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(_prepare(plain_password), hashed_password.encode("utf-8"))
+    except ValueError:
+        # A malformed or truncated hash in the database is a failed login, not
+        # a 500 - and definitely not a success.
+        return False
 
 
 def create_access_token(subject: str) -> str:

@@ -82,3 +82,41 @@ def test_login_with_wrong_password_fails(client):
         json={"email": "real@example.com", "password": "wrongpassword"},
     )
     assert response.status_code == 401
+
+
+def test_a_password_longer_than_bcrypt_s_limit_still_works(client):
+    """bcrypt reads at most 72 bytes; the password is pre-hashed so it fits.
+
+    Without that step this is either a silent truncation (every 72+ byte
+    password sharing a prefix becomes the same password) or, on modern bcrypt,
+    a 500 on signup.
+    """
+    # 87 bytes: past bcrypt's 72-byte limit, inside the schema's 128-char cap.
+    # That window is exactly where the truncation bug lives.
+    long_password = "correct-horse-battery-staple-" * 3
+
+    signup = client.post(
+        "/auth/signup",
+        json={"email": "long@example.com", "password": long_password},
+    )
+    assert signup.status_code == 201, signup.text
+
+    login = client.post(
+        "/auth/login",
+        json={"email": "long@example.com", "password": long_password},
+    )
+    assert login.status_code == 200
+
+    # The truncation bug would make this succeed, since it shares the first
+    # 72 bytes with the real password.
+    wrong = client.post(
+        "/auth/login",
+        json={"email": "long@example.com", "password": long_password + "-wrong"},
+    )
+    assert wrong.status_code == 401
+
+
+def test_a_corrupt_stored_hash_is_a_failed_login_not_a_crash(client, auth_headers):
+    from app.core.security import verify_password
+
+    assert verify_password("anything", "not-a-real-bcrypt-hash") is False
