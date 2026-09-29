@@ -1,6 +1,6 @@
 # AI Developer Collaboration Platform
 
-[![CI](https://github.com/Madhuuu7/ai-collab-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Madhuuu7/ai-collab-platform/actions/workflows/ci.yml)
+[![CI](https://github.com/Madhuuu7/Distributed-Cloud-IDE/actions/workflows/ci.yml/badge.svg)](https://github.com/Madhuuu7/Distributed-Cloud-IDE/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
