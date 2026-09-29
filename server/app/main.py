@@ -4,13 +4,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, execute, files, projects
-from app.core.config import CORS_ORIGINS, EXECUTION_BACKEND
+from app.api import ai, auth, execute, files, projects, search, workspaces
+from app.core.config import AI_PROVIDER, CORS_ORIGINS, EXECUTION_BACKEND
 from app.db.session import Base, engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Importing the routers above pulls in every model module, so every table is
+# registered on Base by the time this runs. Adding a model that no router
+# imports would silently skip its table - import it here if that happens.
 Base.metadata.create_all(bind=engine)
 
 
@@ -23,12 +26,18 @@ async def lifespan(_: FastAPI):
             EXECUTION_BACKEND,
         )
 
+    if AI_PROVIDER == "mock":
+        logger.info(
+            "AI_PROVIDER=mock - responses are generated locally and cost "
+            "nothing. Set a real provider for genuine output."
+        )
+
     yield
 
 
 app = FastAPI(
-    title="Distributed Cloud IDE API",
-    version="0.2.0",
+    title="AI Developer Collaboration Platform API",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -44,8 +53,17 @@ app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(files.router, prefix="/projects", tags=["files"])
 app.include_router(execute.router, prefix="/execute", tags=["execute"])
+app.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces"])
+app.include_router(ai.router, prefix="/ai", tags=["ai"])
+# No prefix: this router owns both /search and /projects/{id}/index, which
+# belong to different resource trees.
+app.include_router(search.router, tags=["search"])
 
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
-    return {"status": "ok", "execution_backend": EXECUTION_BACKEND}
+    return {
+        "status": "ok",
+        "execution_backend": EXECUTION_BACKEND,
+        "ai_provider": AI_PROVIDER,
+    }

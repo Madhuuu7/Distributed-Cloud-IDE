@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, get_owned_file, get_owned_project
+from app.core.deps import (
+    get_db,
+    get_owned_file,
+    get_owned_project,
+    get_writable_file,
+    require_project_editor,
+)
 from app.models.file import FileNode
 from app.models.project import Project
 from app.schemas.file import FileCreate, FileOut, FileUpdate
@@ -26,7 +32,7 @@ def list_files(
 @router.post("/{project_id}/files", response_model=FileOut, status_code=status.HTTP_201_CREATED)
 def create_file(
     payload: FileCreate,
-    project: Project = Depends(get_owned_project),
+    project: Project = Depends(require_project_editor),
     db: Session = Depends(get_db),
 ) -> FileOut:
     name = payload.name.strip().strip("/")
@@ -66,7 +72,7 @@ def get_file(file_node: FileNode = Depends(get_owned_file)) -> FileOut:
 @router.put("/file/{file_id}", response_model=FileOut)
 def update_file(
     payload: FileUpdate,
-    file_node: FileNode = Depends(get_owned_file),
+    file_node: FileNode = Depends(get_writable_file),
     db: Session = Depends(get_db),
 ) -> FileOut:
     file_node.content = payload.content
@@ -79,7 +85,7 @@ def update_file(
 
 @router.delete("/file/{file_id}")
 def delete_file(
-    file_node: FileNode = Depends(get_owned_file),
+    file_node: FileNode = Depends(get_writable_file),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     db.delete(file_node)
