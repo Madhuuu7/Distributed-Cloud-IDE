@@ -1,0 +1,87 @@
+# Render blueprint: API + static client in one deploy.
+#
+# Render was chosen over splitting the frontend onto Vercel because this is a
+# demo someone else has to be able to stand up: one account, one blueprint, one
+# click. The trade is Render's free tier, whose limits are listed in the README
+# rather than discovered later.
+#
+# To deploy: push this repo to GitHub, then New > Blueprint on Render and point
+# it here. After the first deploy, set the two cross-referencing URLs (marked
+# `sync: false` below) - they cannot be known until both services exist.
+
+services:
+  - type: web
+    name: ai-collab-api
+    runtime: python
+    plan: free
+    # Closest region to Bengaluru; Render's free tier offers no Indian region.
+    region: singapore
+    rootDir: server
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+      # Turns a default signing key and an unsandboxed execution backend from
+      # silent misconfigurations into startup failures. See app/core/config.py.
+      - key: APP_ENV
+        value: production
+
+      # Render generates this and never shows it in the repo. The production
+      # guard refuses to start without it, so a forgotten key fails the deploy
+      # instead of shipping a forgeable JWT.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Render provides no Docker daemon, and the only alternative would be
+      # running user-submitted code directly on the web host. Execution and fix
+      # runs return 503 here with an explanation; both work locally.
+      - key: EXECUTION_BACKEND
+        value: disabled
+
+      # No API key, no spend. Swap to anthropic/gemini and add the key in the
+      # Render dashboard to make the demo answer for real.
+      - key: AI_PROVIDER
+        value: mock
+      - key: AI_EMBEDDING_PROVIDER
+        value: mock
+
+      # The free tier has no persistent disk, so this database resets on every
+      # deploy and every cold start. /tmp makes that explicit rather than
+      # looking like durable storage that silently is not.
+      - key: DB_PATH
+        value: /tmp/app.db
+
+      # Set to the static site's URL once it exists, e.g.
+      # https://ai-collab-web.onrender.com
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: ai-collab-web
+    runtime: static
+    rootDir: client
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Set to the API's URL, e.g. https://ai-collab-api.onrender.com
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      # A single-page app: every path has to reach index.html or a refresh on
+      # /ide/1 returns a 404 from the static host.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

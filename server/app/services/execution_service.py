@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 SANDBOX_DIR = "sandbox"
 TRUNCATION_NOTICE = "\n... output truncated ..."
 
+DISABLED_MESSAGE = (
+    "Code execution is switched off on this deployment. The host provides no "
+    "Docker daemon, and running user code without one would mean running it "
+    "unsandboxed on the server. Clone and run the project locally to use this "
+    "feature."
+)
+
 
 class ExecutionError(Exception):
     """Base class for execution failures that should surface to the caller."""
@@ -95,6 +102,9 @@ def run_code(language: str, code: str) -> ExecutionResult:
             f"Unsupported language '{language}'. Supported: {supported}."
         )
 
+    if EXECUTION_BACKEND == "disabled":
+        raise SandboxUnavailable(DISABLED_MESSAGE)
+
     if EXECUTION_BACKEND == "local":
         logger.warning("Executing user code with the unsandboxed local backend")
         return _run_locally(spec, code)
@@ -135,6 +145,9 @@ def run_project(
         )
 
     resolved = command or default_test_command(language) or spec.command
+
+    if EXECUTION_BACKEND == "disabled":
+        raise SandboxUnavailable(DISABLED_MESSAGE)
 
     if EXECUTION_BACKEND == "local":
         logger.warning("Running project with the unsandboxed local backend")

@@ -10,7 +10,23 @@ DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db"))
 # SQLite will not create missing directories on its own.
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+# "development" or "production". Production turns the two footguns below into
+# startup failures instead of silent, exploitable defaults.
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+IS_PRODUCTION = APP_ENV == "production"
+
+# A JWT signing key that everyone can read on GitHub is the same as no
+# authentication at all: anyone can mint a token for any user. In development a
+# default is a convenience; in production it is a breach, so the app refuses to
+# start rather than come up quietly insecure.
+DEV_SECRET_KEY = "dev-secret-key"
+SECRET_KEY = os.getenv("SECRET_KEY", DEV_SECRET_KEY)
+
+if IS_PRODUCTION and SECRET_KEY == DEV_SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY is still the development default while APP_ENV=production. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+    )
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
@@ -25,9 +41,27 @@ CORS_ORIGINS = [
 ]
 
 # Code execution sandbox.
-# "docker" runs each submission in a throwaway container (the safe default).
-# "local" falls back to a bare subprocess on this host - development only.
+# "docker"   - each submission runs in a throwaway container (the safe default)
+# "local"    - a bare subprocess on this host; no isolation, development only
+# "disabled" - execution endpoints return 503
+#
+# "disabled" exists for hosts with no Docker daemon to offer. Managed platforms
+# like Render and Vercel do not expose one, and the alternative there is
+# "local", which on a public URL is remote code execution as a service.
 EXECUTION_BACKEND = os.getenv("EXECUTION_BACKEND", "docker").lower()
+
+if EXECUTION_BACKEND not in {"docker", "local", "disabled"}:
+    raise RuntimeError(
+        f"EXECUTION_BACKEND must be 'docker', 'local', or 'disabled', "
+        f"not {EXECUTION_BACKEND!r}."
+    )
+
+if IS_PRODUCTION and EXECUTION_BACKEND == "local":
+    raise RuntimeError(
+        "EXECUTION_BACKEND=local runs user-submitted code directly on the host "
+        "with no isolation. Refusing to start with APP_ENV=production. Use "
+        "'docker' where a daemon is available, or 'disabled' where one is not."
+    )
 EXECUTION_TIMEOUT_SECONDS = int(os.getenv("EXECUTION_TIMEOUT_SECONDS", "10"))
 EXECUTION_MEMORY_LIMIT = os.getenv("EXECUTION_MEMORY_LIMIT", "256m")
 EXECUTION_CPU_LIMIT = float(os.getenv("EXECUTION_CPU_LIMIT", "0.5"))
