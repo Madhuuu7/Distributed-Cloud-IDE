@@ -1,24 +1,27 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { projectsApi } from "../services/api";
-
-type Project = {
-  id: number;
-  name: string;
-  owner_id: number;
-};
+import { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { errorMessage, projectsApi } from '../services/api';
+import type { Project } from '../types';
 
 export default function DashboardPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectName, setProjectName] = useState("");
-
   const navigate = useNavigate();
+
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectName, setProjectName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+
   const loadProjects = async () => {
     try {
-      const response = await projectsApi.list();
-      setProjects(response.data);
-    } catch (error) {
-      console.error("Failed to load projects", error);
+      const { data } = await projectsApi.list();
+      setProjects(data);
+      setError('');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not load your projects'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -26,90 +29,109 @@ export default function DashboardPage() {
     loadProjects();
   }, []);
 
-  const createProject = async () => {
-    if (!projectName.trim()) return;
+  const createProject = async (event: FormEvent) => {
+    event.preventDefault();
+
+    const name = projectName.trim();
+
+    if (!name) return;
+
+    setCreating(true);
 
     try {
-      await projectsApi.create({
-        name: projectName,
-      });
-
-      setProjectName("");
-      loadProjects();
-    } catch (error) {
-      console.error("Failed to create project", error);
+      await projectsApi.create({ name });
+      setProjectName('');
+      await loadProjects();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not create the project'));
+    } finally {
+      setCreating(false);
     }
   };
 
-  const deleteProject = async (id: number) => {
+  const deleteProject = async (project: Project) => {
+    if (!window.confirm(`Delete "${project.name}" and all of its files?`)) {
+      return;
+    }
+
     try {
-      await projectsApi.delete(id);
-      loadProjects();
-    } catch (error) {
-      console.error("Failed to delete project", error);
+      await projectsApi.delete(project.id);
+      await loadProjects();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete the project'));
     }
   };
 
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6">
-        <h1 className="text-3xl font-bold text-white">
-          Distributed Cloud IDE
-        </h1>
+        <h1 className="text-3xl font-bold text-white">Your projects</h1>
 
         <p className="mt-2 text-slate-400">
-          Manage your cloud projects.
+          Each project is an isolated workspace. Code runs in a throwaway container.
         </p>
 
-        <div className="mt-6 flex gap-3">
+        <form onSubmit={createProject} className="mt-6 flex gap-3">
           <input
-            className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white"
-            placeholder="Project Name"
+            className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none"
+            placeholder="New project name"
             value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
+            onChange={(event) => setProjectName(event.target.value)}
           />
 
           <button
-            onClick={createProject}
-            className="rounded-lg bg-blue-600 px-5 py-2 text-white hover:bg-blue-700"
+            type="submit"
+            disabled={creating || !projectName.trim()}
+            className="rounded-lg bg-brand-500 px-5 py-2 font-medium text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Create
+            {creating ? 'Creating...' : 'Create'}
           </button>
-        </div>
+        </form>
+
+        {error && (
+          <p role="alert" className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">
+            {error}
+          </p>
+        )}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {projects.map((project) => (
-          <div
-            key={project.id}
-            className="rounded-2xl border border-slate-800 bg-slate-900 p-5"
-          >
-            <h2 className="text-xl font-semibold text-white">
-              {project.name}
-            </h2>
+      {loading ? (
+        <p className="text-slate-500">Loading projects...</p>
+      ) : projects.length === 0 ? (
+        <section className="rounded-2xl border border-dashed border-slate-800 p-10 text-center">
+          <p className="text-slate-400">No projects yet.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Create your first one above to open the editor.
+          </p>
+        </section>
+      ) : (
+        <section className="grid gap-4 md:grid-cols-3">
+          {projects.map((project) => (
+            <div
+              key={project.id}
+              className="flex flex-col rounded-2xl border border-slate-800 bg-slate-900 p-5"
+            >
+              <h2 className="text-xl font-semibold text-white">{project.name}</h2>
 
-            <p className="mt-2 text-slate-400">
-              Owner ID: {project.owner_id}
-            </p>
+              <div className="mt-5 flex gap-2">
+                <button
+                  onClick={() => navigate(`/ide/${project.id}`)}
+                  className="rounded bg-brand-500 px-4 py-2 text-white transition hover:bg-brand-600"
+                >
+                  Open IDE
+                </button>
 
-            <div className="mt-5 flex gap-2">
-              <button
-                onClick={() => navigate(`/ide/${project.id}`)}
-                className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-          >
-                Open IDE
-              </button>
-
-              <button
-                onClick={() => deleteProject(project.id)}
-                className="rounded bg-red-600 px-4 py-2 text-white hover:bg-red-700"
-              >
-                Delete
-              </button>
+                <button
+                  onClick={() => deleteProject(project)}
+                  className="rounded border border-slate-700 px-4 py-2 text-slate-300 transition hover:border-red-500/50 hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-      </section>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

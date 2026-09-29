@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class FileCreate(BaseModel):
@@ -18,5 +18,4 @@ class FileOut(BaseModel):
     content: str
     language: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

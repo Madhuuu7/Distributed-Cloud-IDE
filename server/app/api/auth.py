@@ -1,54 +1,45 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.deps import get_current_user, get_db
 from app.core.security import create_access_token, hash_password, verify_password
-from app.db.session import SessionLocal
 from app.models.user import User
-from app.schemas.auth import SignupRequest, LoginRequest, TokenResponse
+from app.schemas.auth import LoginRequest, SignupRequest, TokenResponse, UserOut
 
 router = APIRouter()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@router.post("/signup", response_model=TokenResponse)
+@router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    try:
-        existing = db.query(User).filter(User.email == str(payload.email)).first()
+    email = str(payload.email).lower()
 
-        if existing:
-            raise HTTPException(status_code=400, detail="Email already registered")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
 
-        user = User(
-            email=str(payload.email),
-            full_name=payload.full_name,
-            password_hash=hash_password(payload.password),
-        )
+    user = User(
+        email=email,
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+    )
 
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
-        token = create_access_token(str(user.id))
-        return TokenResponse(access_token=token)
-
-    except Exception as e:
-        print("SIGNUP ERROR:", repr(e))
-        raise
+    return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.query(User).filter(User.email == str(payload.email)).first()
+    email = str(payload.email).lower()
+    user = db.query(User).filter(User.email == email).first()
 
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=create_access_token(str(user.id)))
+
+
+@router.get("/me", response_model=UserOut)
+def read_current_user(current_user: User = Depends(get_current_user)) -> UserOut:
+    return current_user

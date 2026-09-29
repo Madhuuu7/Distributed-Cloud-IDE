@@ -1,32 +1,35 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.db.session import SessionLocal
+from app.core.deps import get_current_user, get_db, get_owned_project
+from app.models.file import FileNode
 from app.models.project import Project
+from app.models.user import User
 from app.schemas.project import ProjectCreate, ProjectOut
 
 router = APIRouter()
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @router.get("", response_model=list[ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).all()
-
-
-@router.post("", response_model=ProjectOut)
-def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
-    project = Project(
-        name=payload.name,
-        owner_id=1
+def list_projects(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ProjectOut]:
+    return (
+        db.query(Project)
+        .filter(Project.owner_id == current_user.id)
+        .order_by(Project.created_at.desc())
+        .all()
     )
+
+
+@router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+def create_project(
+    payload: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProjectOut:
+    project = Project(name=payload.name, owner_id=current_user.id)
 
     db.add(project)
     db.commit()
@@ -35,19 +38,19 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)):
     return project
 
 
+@router.get("/{project_id}", response_model=ProjectOut)
+def get_project(project: Project = Depends(get_owned_project)) -> ProjectOut:
+    return project
+
+
 @router.delete("/{project_id}")
-def delete_project(project_id: int, db: Session = Depends(get_db)):
-    project = db.query(Project).filter(Project.id == project_id).first()
-
-    if not project:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found"
-        )
-
+def delete_project(
+    project: Project = Depends(get_owned_project),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    # Files have no ON DELETE rule, so clear them explicitly to avoid orphans.
+    db.query(FileNode).filter(FileNode.project_id == project.id).delete()
     db.delete(project)
     db.commit()
 
-    return {
-        "message": "Project deleted successfully"
-    }
+    return {"message": "Project deleted successfully"}

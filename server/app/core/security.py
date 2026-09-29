@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+from jose import jwt
 from passlib.context import CryptContext
 from app.core.config import ALGORITHM, SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES
 
@@ -20,6 +20,7 @@ def create_access_token(subject: str) -> str:
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_access_token(token: str) -> str:
+def decode_access_token(token: str) -> str | None:
+    """Return the subject claim, or None if the token is invalid or expired."""
     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     return payload.get("sub")
