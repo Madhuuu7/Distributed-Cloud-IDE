@@ -13,9 +13,14 @@ claiming the fix works.
 
 Built on a browser IDE with Monaco and a hardened Docker sandbox.
 
-> **Live demo:** _add the URL after your first Render deploy._ The demo runs on
-> the mock AI provider and with code execution switched off - see
-> [Deployment](#deployment) for why, and run it locally for the full thing.
+> **Live demo: [ai-collab-web.onrender.com](https://ai-collab-web.onrender.com)**
+> &nbsp;·&nbsp; [API docs](https://ai-collab-api.onrender.com/docs)
+> &nbsp;·&nbsp; [health](https://ai-collab-api.onrender.com/health)
+>
+> Free hosting, so the first request after a quiet spell takes about 50 seconds
+> to wake the server, and the database resets when it sleeps. The demo runs on
+> the mock AI provider with code execution switched off - see
+> [Deployment](#deployment) for why. Run it locally for the full thing.
 
 ## Screenshots
 
