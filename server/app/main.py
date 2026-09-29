@@ -4,7 +4,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import ai, auth, execute, files, projects, search, workspaces
+from app.api import (
+    ai,
+    auth,
+    execute,
+    files,
+    fix,
+    projects,
+    search,
+    workspaces,
+)
 from app.core.config import AI_PROVIDER, CORS_ORIGINS, EXECUTION_BACKEND
 from app.db.session import Base, engine
 
@@ -58,6 +67,7 @@ app.include_router(ai.router, prefix="/ai", tags=["ai"])
 # No prefix: this router owns both /search and /projects/{id}/index, which
 # belong to different resource trees.
 app.include_router(search.router, tags=["search"])
+app.include_router(fix.router, prefix="/fix-runs", tags=["fix"])
 
 
 @app.get("/health")

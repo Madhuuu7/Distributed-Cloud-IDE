@@ -14,6 +14,7 @@ import io
 import logging
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -101,6 +102,48 @@ def run_code(language: str, code: str) -> ExecutionResult:
     return _run_in_docker(spec, code)
 
 
+# The sandbox has no network, so nothing can be pip-installed into it and
+# pytest is not in the base image. `unittest discover` ships with the standard
+# library and writes nothing to disk, which is what a read-only root filesystem
+# requires.
+DEFAULT_TEST_COMMANDS: dict[str, list[str]] = {
+    "python": ["python", "-I", "-B", "-m", "unittest", "discover", "-s", ".", "-p", "test*.py"],
+    "javascript": ["node", "--test"],
+}
+
+
+def default_test_command(language: str) -> list[str] | None:
+    return DEFAULT_TEST_COMMANDS.get(language.strip().lower())
+
+
+def run_project(
+    language: str,
+    files: dict[str, str],
+    command: list[str] | None = None,
+) -> ExecutionResult:
+    """Run a whole project under the same isolation as a single submission.
+
+    Used by the agentic fix loop, where the question is whether a set of files
+    passes its tests rather than what one script prints.
+    """
+    spec = RUNTIMES.get(language.strip().lower())
+
+    if spec is None:
+        supported = ", ".join(supported_languages())
+        raise UnsupportedLanguage(
+            f"Unsupported language '{language}'. Supported: {supported}."
+        )
+
+    resolved = command or default_test_command(language) or spec.command
+
+    if EXECUTION_BACKEND == "local":
+        logger.warning("Running project with the unsandboxed local backend")
+
+        return _run_locally(spec, "", files=files, command=resolved)
+
+    return _run_in_docker(spec, "", files=files, command=resolved)
+
+
 def _truncate(raw: bytes) -> str:
     if len(raw) > EXECUTION_MAX_OUTPUT_BYTES:
         head = raw[:EXECUTION_MAX_OUTPUT_BYTES].decode("utf-8", "replace")
@@ -111,7 +154,17 @@ def _truncate(raw: bytes) -> str:
 
 def _build_code_archive(filename: str, code: str) -> bytes:
     """Tar the submission so it can be copied into the container before start."""
-    data = code.encode("utf-8")
+    return _build_archive({filename: code})
+
+
+def _build_archive(files: dict[str, str]) -> bytes:
+    """Tar a set of files so they can be copied in before the container starts.
+
+    Every file is mode 0444 inside a 0555 directory. Combined with the
+    read-only root filesystem this means the running code cannot rewrite its
+    own source - which matters for the fix loop, where the whole question being
+    asked is whether *this exact* code passes.
+    """
     buffer = io.BytesIO()
 
     with tarfile.open(fileobj=buffer, mode="w") as tar:
@@ -120,12 +173,34 @@ def _build_code_archive(filename: str, code: str) -> bytes:
         directory.mode = 0o555
         tar.addfile(directory)
 
-        member = tarfile.TarInfo(f"{SANDBOX_DIR}/{filename}")
-        member.size = len(data)
-        member.mode = 0o444
-        tar.addfile(member, io.BytesIO(data))
+        for name, content in files.items():
+            safe_name = _safe_member_name(name)
+            data = content.encode("utf-8")
+
+            member = tarfile.TarInfo(f"{SANDBOX_DIR}/{safe_name}")
+            member.size = len(data)
+            member.mode = 0o444
+            tar.addfile(member, io.BytesIO(data))
 
     return buffer.getvalue()
+
+
+def _safe_member_name(name: str) -> str:
+    """Flatten a path so a crafted filename cannot escape the sandbox directory.
+
+    The file names here come from project records and, in the fix loop, from a
+    model's output. ``../../etc/passwd`` as a filename would otherwise be
+    written wherever the tar extraction pointed it.
+    """
+    cleaned = name.replace("\\", "/").lstrip("/")
+    parts = [
+        part for part in cleaned.split("/") if part not in ("", ".", "..")
+    ]
+
+    if not parts:
+        raise ExecutionError(f"Refusing to write a file named {name!r}.")
+
+    return "/".join(parts)
 
 
 def _docker_client():
@@ -149,7 +224,20 @@ def _docker_client():
     return client
 
 
-def _run_in_docker(spec: RuntimeSpec, code: str) -> ExecutionResult:
+def _run_in_docker(
+    spec: RuntimeSpec,
+    code: str,
+    *,
+    files: dict[str, str] | None = None,
+    command: list[str] | None = None,
+) -> ExecutionResult:
+    """Run one submission, or a whole project, in a throwaway container.
+
+    ``files`` and ``command`` are the project path used by the fix loop. They
+    are optional so the original single-file call site is unchanged - the
+    isolation settings below are shared by both, which is the point of not
+    writing a second runner.
+    """
     from docker.errors import APIError, ImageNotFound
     from requests.exceptions import ConnectionError as RequestsConnectionError
     from requests.exceptions import ReadTimeout
@@ -164,7 +252,7 @@ def _run_in_docker(spec: RuntimeSpec, code: str) -> ExecutionResult:
 
     container = client.containers.create(
         image=spec.image,
-        command=spec.command,
+        command=command or spec.command,
         working_dir=f"/{SANDBOX_DIR}",
         # --- isolation ---
         network_disabled=True,
@@ -188,7 +276,8 @@ def _run_in_docker(spec: RuntimeSpec, code: str) -> ExecutionResult:
     )
 
     try:
-        container.put_archive("/", _build_code_archive(spec.filename, code))
+        payload = files if files is not None else {spec.filename: code}
+        container.put_archive("/", _build_archive(payload))
 
         started_at = time.perf_counter()
         container.start()
@@ -233,13 +322,24 @@ def _run_in_docker(spec: RuntimeSpec, code: str) -> ExecutionResult:
             logger.warning("Failed to remove container %s", container.id, exc_info=True)
 
 
-def _run_locally(spec: RuntimeSpec, code: str) -> ExecutionResult:
+def _run_locally(
+    spec: RuntimeSpec,
+    code: str,
+    *,
+    files: dict[str, str] | None = None,
+    command: list[str] | None = None,
+) -> ExecutionResult:
     """Development-only fallback. No isolation beyond a timeout."""
     with tempfile.TemporaryDirectory() as workdir:
         source_path = os.path.join(workdir, spec.filename)
+        payload = files if files is not None else {spec.filename: code}
 
-        with open(source_path, "w", encoding="utf-8") as handle:
-            handle.write(code)
+        for name, content in payload.items():
+            target = os.path.join(workdir, _safe_member_name(name))
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+
+            with open(target, "w", encoding="utf-8") as handle:
+                handle.write(content)
 
         started_at = time.perf_counter()
         timed_out = False
@@ -247,9 +347,18 @@ def _run_locally(spec: RuntimeSpec, code: str) -> ExecutionResult:
         stdout = ""
         stderr = ""
 
+        argv = command if command else [*spec.local_command, source_path]
+
+        # The container image guarantees a `python` on PATH; this host does
+        # not - on Windows the name is frequently a Store stub that fails.
+        # Only the local backend needs this, and only for the interpreter
+        # already running us.
+        if argv and argv[0] == "python":
+            argv = [sys.executable, *argv[1:]]
+
         try:
             completed = subprocess.run(
-                [*spec.local_command, source_path],
+                argv,
                 capture_output=True,
                 cwd=workdir,
                 timeout=EXECUTION_TIMEOUT_SECONDS,
@@ -264,7 +373,7 @@ def _run_locally(spec: RuntimeSpec, code: str) -> ExecutionResult:
             stderr += f"\nExecution timed out after {EXECUTION_TIMEOUT_SECONDS}s."
         except FileNotFoundError as exc:
             raise SandboxUnavailable(
-                f"Runtime '{spec.local_command[0]}' is not installed on this host."
+                f"Runtime '{argv[0]}' is not installed on this host."
             ) from exc
 
         return ExecutionResult(
