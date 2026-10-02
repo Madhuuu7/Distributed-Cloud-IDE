@@ -13,6 +13,13 @@ import pytest
 
 def reload_config(monkeypatch, **environment):
     """Re-import app.core.config with a patched environment."""
+    # Reloading the module re-runs load_dotenv, which would read the .env file
+    # the README tells you to create and put a real SECRET_KEY back into the
+    # environment this test just cleared. The scenario under test could then
+    # never occur - so these tests passed on a clean checkout and failed for
+    # anyone who had actually followed the setup instructions.
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+
     for key, value in environment.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)

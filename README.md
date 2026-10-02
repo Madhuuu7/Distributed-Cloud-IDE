@@ -43,7 +43,7 @@ approves it.
 responses locally and produces hashed n-gram embeddings that carry genuine
 lexical signal. Retrieval, streaming, caching, rate limiting and cost
 accounting all execute for real. Only the quality of the prose is fake, so the
-entire application - and all 87 tests - run at zero cost.
+entire application - and all 99 tests - run at zero cost.
 
 **Retrieval chunks on structure, not line count.** Python and JavaScript
 sources split on function and class boundaries, so a retrieved chunk is a whole
@@ -60,7 +60,7 @@ savings figure on `/ai/usage` mean anything.
 **Frontend** React, Vite, TypeScript, Tailwind CSS, React Router, Axios,
 Monaco Editor
 
-**Backend** FastAPI, SQLAlchemy 2.0, SQLite, JWT, Pydantic, NumPy, Docker SDK
+**Backend** FastAPI, SQLAlchemy 2.0, Alembic, Postgres or SQLite, JWT, Pydantic, NumPy, Docker SDK
 
 **AI** Provider abstraction over Anthropic (Claude), Google Gemini, Ollama, and
 a local mock. Hybrid retrieval over embeddings stored as packed `float32`.
@@ -85,7 +85,7 @@ flowchart LR
     REG --> GEM[Gemini]
     REG --> OLL[Ollama]
 
-    RAG --> DB[(SQLite + vectors)]
+    RAG --> DB[(Postgres or SQLite<br/>+ vectors)]
     FIX --> SANDBOX[Docker sandbox]
     AI --> LEDGER[(Usage ledger)]
 ```
@@ -156,10 +156,33 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r server/requirements.txt
 
 cd server
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
 Interactive API docs: <http://localhost:8000/docs>
+
+#### The database
+
+SQLAlchemy against SQLite by default, Postgres when `DATABASE_URL` is set, and
+Alembic owns the schema either way. The app creates no tables: it checks on
+startup that the database is at the migration head and refuses to run otherwise.
+
+That guard exists because the alternative bit. `Base.metadata.create_all` adds
+missing *tables* but never missing *columns*, so a database created before
+workspaces landed kept a `projects` table with no `workspace_id` and looked
+perfectly healthy until someone created a project - a 500 from deep inside a
+request, on a machine where everything had been working for weeks.
+
+```bash
+cd server
+alembic upgrade head                              # after any pull
+alembic revision --autogenerate -m "what changed" # after any model change
+```
+
+`tests/test_migrations.py` asserts that autogenerate finds nothing left to do,
+so a model change without a matching revision fails the suite rather than the
+next deploy.
 
 Runtime images are pulled on first use. Pre-pull them to skip the wait:
 
@@ -222,9 +245,13 @@ Three more free-tier facts worth knowing before you judge the demo:
 
 - The API sleeps after 15 minutes idle, so the first request after a quiet spell
   takes roughly 50 seconds.
-- There is no persistent disk, so the SQLite database resets on every deploy and
-  every cold start. `DB_PATH=/tmp/app.db` makes that explicit rather than
-  looking like storage that silently is not.
+- There is no persistent disk, which is why the blueprint provisions Postgres
+  rather than keeping a SQLite file on the web service: a file under `/tmp` is
+  wiped on every deploy and every cold start, so anyone who signed up to try the
+  demo lost their account within the hour. Render's free Postgres instances are
+  deleted a set number of days after creation - check the current policy, and
+  point `DATABASE_URL` at a provider with no expiry if the link has to keep
+  working.
 - `AI_PROVIDER=mock` by default: the demo costs nothing to run. Set
   `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` in the Render dashboard for
   real answers.

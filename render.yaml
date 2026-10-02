@@ -18,7 +18,9 @@ services:
     region: singapore
     rootDir: server
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Migrations run before the server starts, and a failure here fails the
+    # deploy rather than booting an app whose schema is one column behind.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
@@ -48,11 +50,22 @@ services:
       - key: AI_EMBEDDING_PROVIDER
         value: mock
 
-      # The free tier has no persistent disk, so this database resets on every
-      # deploy and every cold start. /tmp makes that explicit rather than
-      # looking like durable storage that silently is not.
-      - key: DB_PATH
-        value: /tmp/app.db
+      # Postgres, because the free web service has no persistent disk: a SQLite
+      # file under /tmp is wiped on every deploy and every cold start, which
+      # means anyone who signs up to try the demo loses their account within
+      # the hour. Render injects the connection string from the database below.
+      #
+      # Render's own free Postgres is the one-click option, but free instances
+      # are deleted a set number of days after creation - check the current
+      # policy before relying on it for a link that sits on a resume. To use an
+      # external provider instead (Neon and Supabase both have free tiers with
+      # no expiry), delete the `databases:` block at the end of this file and
+      # the two lines below, then add DATABASE_URL as a sync: false variable
+      # and paste the provider's connection string into the dashboard.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-collab-db
+          property: connectionString
 
       # Set to the static site's URL once it exists, e.g.
       # https://ai-collab-web.onrender.com
@@ -85,3 +98,10 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+
+databases:
+  - name: ai-collab-db
+    plan: free
+    region: singapore
+    databaseName: ai_collab
+    user: ai_collab

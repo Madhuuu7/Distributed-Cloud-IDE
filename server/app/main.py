@@ -15,15 +15,14 @@ from app.api import (
     workspaces,
 )
 from app.core.config import AI_PROVIDER, CORS_ORIGINS, EXECUTION_BACKEND
-from app.db.session import Base, engine
+from app.db.migrate import assert_schema_is_current
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Importing the routers above pulls in every model module, so every table is
-# registered on Base by the time this runs. Adding a model that no router
-# imports would silently skip its table - import it here if that happens.
-Base.metadata.create_all(bind=engine)
+# Alembic owns the schema; the app only refuses to run against one that is out
+# of date. See app/db/migrate.py for why this is a startup failure.
+assert_schema_is_current()
 
 
 @asynccontextmanager

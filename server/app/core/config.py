@@ -7,8 +7,37 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
 DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db"))
 
-# SQLite will not create missing directories on its own.
-Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+def _normalise_database_url(url: str) -> str:
+    """Make a provider's connection string one SQLAlchemy will accept.
+
+    Managed Postgres still hands out the ``postgres://`` scheme SQLAlchemy
+    dropped in 1.4, and the driver has to be named explicitly or SQLAlchemy
+    reaches for psycopg2, which is not installed.
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
+
+    return url
+
+
+# DATABASE_URL wins wherever it is set - that is what a managed Postgres hands
+# you and what Render injects from the database block in render.yaml. Without
+# it the app falls back to a SQLite file, so a fresh clone still runs with no
+# database to install.
+_database_url = os.getenv("DATABASE_URL", "").strip()
+
+if _database_url:
+    DATABASE_URL = _normalise_database_url(_database_url)
+else:
+    # SQLite will not create missing directories on its own.
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    DATABASE_URL = f"sqlite:///{DB_PATH}"
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
 # "development" or "production". Production turns the two footguns below into
 # startup failures instead of silent, exploitable defaults.
