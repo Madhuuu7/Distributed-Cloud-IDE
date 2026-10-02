@@ -26,8 +26,8 @@ Built on a browser IDE with Monaco and a hardened Docker sandbox.
 
 | | |
 |---|---|
-| _Add `docs/images/ide.png`_ | _Add `docs/images/usage.png`_ |
-| The IDE with the assistant panel: a grounded answer with clickable citations | The usage dashboard: spend, cache hit rate, and per-feature breakdown |
+| ![The IDE with the assistant panel](docs/images/ide.png) | ![The usage dashboard](docs/images/usage.png) |
+| The IDE with the assistant panel: a grounded answer, each citation a file, line range and symbol you can click to jump to | The usage dashboard: calls, tokens, cache hit rate and per-feature breakdown. Spend reads $0.00 because these calls ran on the mock provider |
 
 ## What is actually interesting here
 
