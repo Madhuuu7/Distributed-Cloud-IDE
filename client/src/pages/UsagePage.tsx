@@ -287,11 +287,12 @@ function DailyColumns({
           );
         })}
 
-        {/* First and last date only - a label per column collides at 30 days. */}
-        {[0, days.length - 1].map((index) =>
+        {/* First and last date only - a label per column collides at 30 days.
+            A single day is both, so dedupe or the one label is drawn twice. */}
+        {[...new Set([0, days.length - 1])].map((index) =>
           days[index] ? (
             <text
-              key={index}
+              key={days[index].day}
               x={padding.left + index * slot + slot / 2}
               y={height - 8}
               textAnchor={index === 0 ? 'start' : 'end'}
