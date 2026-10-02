@@ -1,6 +1,11 @@
 {
   "compilerOptions": {
     "composite": true,
+    // Without these, `tsc -b` emits vite.config.js, vite.config.d.ts and the
+    // build-info files next to the sources, where they get committed and then
+    // churn on every build.
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",

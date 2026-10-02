@@ -13,3 +13,5 @@ server/data/
 data/*.db
 *.tsbuildinfo
 .pytest_cache/
+client/vite.config.js
+client/vite.config.d.ts

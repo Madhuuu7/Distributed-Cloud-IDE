@@ -43,7 +43,7 @@ approves it.
 responses locally and produces hashed n-gram embeddings that carry genuine
 lexical signal. Retrieval, streaming, caching, rate limiting and cost
 accounting all execute for real. Only the quality of the prose is fake, so the
-entire application - and all 99 tests - run at zero cost.
+entire application - and all 135 tests - run at zero cost.
 
 **Retrieval chunks on structure, not line count.** Python and JavaScript
 sources split on function and class boundaries, so a retrieved chunk is a whole
@@ -264,14 +264,29 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-93 tests, all runnable without a Docker daemon and without an API key. They
+99 tests, all runnable without a Docker daemon and without an API key. They
 cover authentication, cross-user isolation, role boundaries, the sandbox
 arguments themselves (loosening a flag fails a test), index staleness, cache
 behaviour, hallucinated-citation filtering, the rate limiter, the production
-startup guards, and the fix loop driven by a scripted model.
+startup guards, the migrations still matching the models, and the fix loop
+driven by a scripted model.
 
-CI runs them on every push, along with a frontend typecheck and build and a
-check that `docs/api/openapi.json` still matches what the app serves - a stale
+```bash
+cd client
+npm test
+```
+
+36 more on the frontend. The one with a real failure mode is the SSE reader:
+frames arrive in whatever chunks the network hands over, so a reply split
+mid-JSON across two reads has to survive until the rest of it turns up - a
+parser that assumes whole frames passes every hand-written test and drops
+tokens against a real server. The rest cover citation rendering and the click
+that opens the cited range, the FastAPI error shapes the UI has to read, and
+the usage chart's single-day case, which is a regression test for a duplicate
+React key.
+
+CI runs both suites on every push, along with a typecheck and build and a check
+that `docs/api/openapi.json` still matches what the app serves - a stale
 contract is worse than no contract.
 
 To exercise the real sandbox end to end:

@@ -46,7 +46,7 @@ jobs:
         run: pytest -q
 
   frontend:
-    name: Frontend typecheck and build
+    name: Frontend tests and build
     runs-on: ubuntu-latest
 
     steps:
@@ -61,6 +61,10 @@ jobs:
       - name: Install dependencies
         working-directory: client
         run: npm ci
+
+      - name: Run tests
+        working-directory: client
+        run: npm test
 
       - name: Typecheck and build
         working-directory: client
@@ -83,6 +87,15 @@ jobs:
       - name: Install dependencies
         working-directory: server
         run: pip install -r requirements.txt
+
+      - name: Create the schema
+        working-directory: server
+        # The app refuses to import against a database that is behind the
+        # migrations, and generating the spec imports the app.
+        env:
+          SECRET_KEY: ci-test-key
+          EXECUTION_BACKEND: disabled
+        run: alembic upgrade head
 
       - name: Check the committed OpenAPI spec matches the code
         working-directory: server
