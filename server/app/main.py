@@ -14,8 +14,8 @@ from app.api import (
     search,
     workspaces,
 )
-from app.core.config import AI_PROVIDER, CORS_ORIGINS, EXECUTION_BACKEND
-from app.db.migrate import assert_schema_is_current
+from app.core.config import AI_PROVIDER, CORS_ORIGINS, EXECUTION_BACKEND, IS_SQLITE
+from app.db.migrate import assert_schema_is_current, current_revision
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,4 +75,9 @@ def health_check() -> dict[str, str]:
         "status": "ok",
         "execution_backend": EXECUTION_BACKEND,
         "ai_provider": AI_PROVIDER,
+        # Which engine, never the connection string - that carries credentials.
+        # Without this the only way to tell a deploy that kept its data from one
+        # that resets on every cold start is to read the host's logs.
+        "database": "sqlite" if IS_SQLITE else "postgresql",
+        "schema_revision": current_revision() or "none",
     }
